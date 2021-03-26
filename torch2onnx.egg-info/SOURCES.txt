@@ -1,9 +1,0 @@
-README.md
-setup.py
-torch2onnx/__init__.py
-torch2onnx/torch2onnx.py
-torch2onnx.egg-info/PKG-INFO
-torch2onnx.egg-info/SOURCES.txt
-torch2onnx.egg-info/dependency_links.txt
-torch2onnx.egg-info/requires.txt
-torch2onnx.egg-info/top_level.txt

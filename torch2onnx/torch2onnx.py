@@ -1,5 +1,11 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
+########################################
+# to do list:
+# 1. normal model type: import all class from python files
+# 2. bad case: resnet34 failed
+# 3. simplify argument name
+#########################################
 from __future__ import print_function
 
 import argparse
@@ -21,19 +27,20 @@ class TorchModelType(Enum):
 
 # error
 NOT_FOUND_ERROR = 'Not Found Error.'
-PARAM_INVALID_ERROR = 'Parameter Invalid Error.'
+INVALID_PARAM_ERROR = 'Parameter Invalid Error.'
 FAILURE_OPERATION_ERR0R = 'Failure Operation Error.'
-
-# variables
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # arguments
 def get_args():
     parser = argparse.ArgumentParser(description='PyTorch Convertor Tool')
+    # cuda
+    parser.add_argument('--cuda', default=True,
+                        help='Using CUDA or not (default: True)')
     # model relates
-    parser.add_argument('--src-model-path', type=str, default="./model.pth",
-                        help='Source Model\'s filename, Notice should be absolut path (default: \'./model.pth\')')
+    # !!!required!!!
+    parser.add_argument('--src-model-path', type=str, default='',
+                        help='Source Model\'s filename, Notice should be absolut path (default: \'\')')
     parser.add_argument('--dst-model-dir', type=str, default="./",
                         help='Destination Model\'s directory (default: \'./\')')
     parser.add_argument('--dst-model-name', type=str, default="dst_model",
@@ -44,12 +51,12 @@ def get_args():
     parser.add_argument('-t', '--torch-script', default=True,
                         help='Saving the current Model as TORCH-SCRIPT (default: True)')
     # net
-    parser.add_argument('-f', '--net-file', type=str, default="./net.py",
-                        help='Torch Net Class Name (default: \'./net.py\')')
-    parser.add_argument('-c', '--cls-name', type=str, default="Net",
-                        help='Torch Net Class Name (default: \'Net\')')
-    parser.add_argument('--func-name', type=str, default="GetNetInstance",
-                        help='Function Name of getting Net Class Instance (default: \'./GetNetInstance\')')
+    parser.add_argument('-f', '--net-file', type=str, default="",
+                        help='Torch Net Class Name (default: \'\')')
+    parser.add_argument('-c', '--cls-name', type=str, default="",
+                        help='Torch Net Class Name (default: \'\')')
+    parser.add_argument('--func-name', type=str, default="",
+                        help='Function Name of getting Net Class Instance (default: \'\')')
 
     parser.add_argument('-b', '--batch', type=int, default='1',
                         help='Input Name for Model (default: 1)')
@@ -63,58 +70,60 @@ def get_args():
                         help='Output Name for Model (default: \'output\')')
     parser.add_argument('--output-shape', type=int, nargs='+', default=10,
                         help='Output Shape for Model, Notice without Batch-Size! (default: (10))')
-
-    # parser.add_argument('--onnx', default=True,
-    #                     help='Saving the current Model as ONNX (default: True)')
-    # parser.add_argument('--torch-script', default=True,
-    #                     help='Saving the current Model as TORCH-SCRIPT (default: True)')
-
-    # parser.add_argument('--net-file-path', type=str, default="./net.py",
-    #                     help='Torch Net Class Name (default: \'./net.py\')')
-    # parser.add_argument('--net-cls-name', type=str, default="Net",
-    #                     help='Torch Net Class Name (default: \'Net\')')
-    # parser.add_argument('--ext-func-name', type=str, default="GetNetInstance",
-    #                     help='Function Name of getting Net Class Instance (default: \'./GetNetInstance\')')
-
-    # parser.add_argument('--batch-size', type=int, default=1,
-    #                     help='Batch Size for Model (default: 1)')
-    # parser.add_argument('--input-name', type=str, default="input",
-    #                     help='Input Name for Model (default: input)')
-    # parser.add_argument('--input-shape', type=int, nargs='+', default=(1, 28, 28),
-    #                     help='Input Shape for Model, Notice without Batch-Size! (default: (1, 28, 28))')
-    #
-    # parser.add_argument('--output-name', type=str, default="output",
-    #                     help='Output Name for Model (default: \'output\')')
-    # parser.add_argument('--output-shape', type=int, nargs='+', default=10,
-    #                     help='Output Shape for Model, Notice without Batch-Size! (default: (10))')
     return parser.parse_args()
 
 
-def parse_net_cls_path(net_file_path):
-    if not str.endswith(net_file_path, '.py'):
-        print("{} Not .py file, pls check \'{}\'".format(PARAM_INVALID_ERROR, net_file_path))
+def _parse_python_path(path):
+    if not str.endswith(path, '.py'):
+        print("{} Not python file, pls check \'{}\'".format(INVALID_PARAM_ERROR, path))
         return False, None, None
-    if not os.path.exists(net_file_path):
-        print("{} No such file, pls check \'{}\'".format(NOT_FOUND_ERROR, net_file_path))
+    if not os.path.exists(path):
+        print("{} No such python file, pls check \'{}\'".format(NOT_FOUND_ERROR, path))
         return False, None, None
-    import_module_dir = os.path.dirname(net_file_path)
-    import_module_name = str.split(os.path.basename(net_file_path), '.py')[0]
-    if import_module_name == '':
-        print("{} Invalid .py file, empty filename, pls check \'{}\'".format(PARAM_INVALID_ERROR, net_file_path))
+    module_path = os.path.dirname(path)
+    module_name = str.split(os.path.basename(path), '.py')[0]
+    if module_name == '':
+        print("{} Invalid .py file, empty filename, pls check \'{}\'".format(INVALID_PARAM_ERROR, path))
         return False, None, None
-    return True, import_module_dir, import_module_name
+    return True, module_path, module_name
 
 
-def import_module(module_path: str, module_name: str, module_elm: list):
-    try:
+# variables
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+args = get_args()
+
+
+def _import_module(module_path: str, module_name: str):
+    if module_path is not None:
         sys.path.append(module_path)
-        module = importlib.import_module(module_name)
-        globals().update({k: getattr(module, k) for k in module_elm})
-        return module
+
+    if module_name is not None:
+        try:
+            module = importlib.import_module(module_name)
+            return True, module
+        except Exception as e:
+            print('{} Import module \'{}\' failed, please check python file \'{}.{}.py\'. Error: {}'.
+                  format(FAILURE_OPERATION_ERR0R, module_name, module_path, module_name, e))
+            return False, None
+
+
+def import_element_by_module(module, elms: list):
+    if module is None:
+        return False, module
+    try:
+        globals().update({k: getattr(module, k) for k in elms})
     except Exception as e:
-        print('{} Import failed, pls check cls-name \'{}\' and net-file \'{}\'. Error: {}'.
-              format(FAILURE_OPERATION_ERR0R, args.cls_name, args.net_file, e))
-        return None
+        print('{} Import \'{}\' failed, pls check cls-name \'{}\' and net-file \'{}\'. Error: {}'.
+              format(FAILURE_OPERATION_ERR0R, elms, args.cls_name, args.net_file, e))
+        return False, module
+    return True, module
+
+
+def import_module_by_python_file(path):
+    ok, module_path, module_name = _parse_python_path(path=path)
+    if ok:
+        return _import_module(module_path=module_path,
+                              module_name=module_name)
 
 
 # torch to onnx
@@ -162,7 +171,7 @@ def to_onnx(model, export_dir: str, export_file: str, batch_size: int,
 
 
 # torch to torch-script
-def to_torch_script(model, export_dir: str, export_file: str, batch_size: int, input_shape: list, trace=True) -> bool:
+def to_torch_script(model, export_dir: str, export_file: str, batch_size: int, input_shape: list, trace: bool) -> bool:
     # set the model to inference mode
     model.eval()
 
@@ -185,87 +194,106 @@ def to_torch_script(model, export_dir: str, export_file: str, batch_size: int, i
         return True
 
 
-def _load_model_with_state_dict(param, cls=None, func=None):
-    model = None
-    if func is not None:
-        try:
-            model = func()
-            model.load_state_dict(param)
-        except Exception as e:
-            print('{} Failed to call load_state_dict() or {}. Error: {}'.format(FAILURE_OPERATION_ERR0R, func, e))
-            pass
-    if model is None and cls is not None:
-        try:
-            model = cls()
-            model.load_state_dict(param)
-        except Exception as e:
-            print('{} Failed to call load_state_dict() or {}. Error: {}'.format(FAILURE_OPERATION_ERR0R, cls, e))
-            return False, None, None
-
-    return True, model, TorchModelType.STAT_DICT
-
-
-def _load_model_with_normal_model(model):
-    return True, model, TorchModelType.NORMAL_MODEL
-
-
-def _load_model_with_torch_script(path):
+def _load_model_with_torch_script(path: str):
     try:
-        model = torch.jit.load(path)
-    except Exception:
+        model = torch.jit.load(path).to(device)
+    except Exception as e:
         return False, None, None
     return True, model, TorchModelType.TORCH_SCRIPT
 
 
-def _load_model(model, net_type, path, cls=None, func=None):
-    if isinstance(model, collections.OrderedDict):
-        return _load_model_with_state_dict(param=model, cls=cls, func=func)
-    elif isinstance(model, net_type):
-        return _load_model_with_normal_model(model=model)
-    else:
-        return _load_model_with_torch_script(path=path)
-
-
-def load_model(path, cls=None, func=None):
+def _load_model_with_normal_model(path: str):
     try:
-        ok = False
-        model_type = None
         model = torch.load(path)
-        if func is not None:
-            ok, model, model_type = _load_model(model=model, net_type=type(func()), path=path, cls=None, func=func)
-        if not ok and cls is not None:
-            ok, model, model_type = _load_model(model=model, net_type=cls, path=path, cls=cls, func=None)
-        if not ok:
+        if isinstance(model, collections.OrderedDict):
             return False, None, None
-        else:
-            return ok, model, model_type
+        model = model.to(device)
+        return True, model, TorchModelType.NORMAL_MODEL
     except Exception as e:
-        print("{} torch.load(\'{}\') failed. Error: {}".format(FAILURE_OPERATION_ERR0R, path, e))
+        print("{} Failed to call torch.load(\'{}\'). Error: {}".format(FAILURE_OPERATION_ERR0R, path, e))
         return False, None, None
 
 
-def main(module):
-    func = None
-    try:
-        func = eval(args.func_name)
-        print("Use function \'{}\' in {}".format(args.func_name, args.net_file))
-    except Exception as e:
-        # print("{} No such function \'{}\' in {}".format(NOT_FOUND_ERROR, args.func_name, args.net_file))
-        pass
-    cls = None
-    try:
-        cls = getattr(module, args.cls_name)
-        if cls is None:
-            print(
-                "{} No such class \'{}\', pls check {}.".format(NOT_FOUND_ERROR, args.cls_name, args.net_file))
-    except Exception as e:
-        print("{} No such class \'{}\', pls check {}. Error: {}".
-              format(NOT_FOUND_ERROR, args.cls_name, args.net_file, e))
+def _load_model_with_state_dict(path: str, module, class_name: str, func_name: str):
+    param = torch.load(path)
+    if not isinstance(param, collections.OrderedDict):
+        return False, None, None
+    if class_name == "" and func_name == "":
+        print("{} Torch-Checkpoint(state_dict) format model, "
+              "Class Name of net definition or Get Net Instance Function must be provided, "
+              "please \'-h\' to see usage.".format(INVALID_PARAM_ERROR))
+        return False, None, None
+    # try function loader
+    elif func_name != "":
+        try:
+            func = eval(func_name)
+            model = func().to(device)
+            model.load_state_dict(param)
+            return True, model, TorchModelType.STAT_DICT
+        except Exception as e:
+            print("{} Failed to call \'load_state_dict()\' or \'{}()\'. Error: {}".
+                  format(FAILURE_OPERATION_ERR0R, func_name, e))
+            pass
+    else:
+        try:
+            cls = getattr(module, class_name)
+            model = cls().to(device)
+            model.load_state_dict(param)
+            return True, model, TorchModelType.STAT_DICT
+        except Exception as e:
+            print("{} Failed to call \'load_state_dict()\' or \'{}()\'. Error: {}".
+                  format(FAILURE_OPERATION_ERR0R, class_name, e))
+            return False, None, None
+
+
+def load_model(model_path, python_path, class_name, func_name):
+    # try 1. torch-script?
+    ok, model, model_type = _load_model_with_torch_script(path=model_path)
+    if ok:
+        return ok, model, model_type
+    if python_path == "" or class_name == "":
+        print("{} Not a Torch-Script format model, python file and class name of net definition must be provided, "
+              "please \'-h\' to see usage".
+              format(INVALID_PARAM_ERROR))
+        return False, None, None
+    ok, module = import_module_by_python_file(path=python_path)
+    if not ok or module is None:
+        print("{} Not a Torch-Script format model, python file with net definition must be provided, "
+              "but {} is not a valid python file".format(INVALID_PARAM_ERROR, python_path))
+        return False, None, None
+    elms = [class_name]
+    if func_name != "":
+        elms.append(func_name)
+    ok, module = import_element_by_module(module=module, elms=elms)
+    if not ok:
+        print("{} Not a Torch-Script format model, class name of net definition must be provided, "
+              "but {} is not the correct class name.".format(INVALID_PARAM_ERROR, class_name))
+        return False, None, None
+    # try 2. torch-model?
+    ok, model, model_type = _load_model_with_normal_model(path=model_path)
+    if ok:
+        return ok, model, model_type
+    # try 3. torch-state-dict?
+    ok, model, model_type = _load_model_with_state_dict(path=model_path, module=module,
+                                                        class_name=class_name, func_name=func_name)
+    if ok:
+        return ok, model, model_type
+    print("{} Not Invalid Model, please check your model{}".format(FAILURE_OPERATION_ERR0R, model_path))
+    return False, None, None
+
+
+def main():
+    # !!!required!!!
+    if args.src_model_path == "":
+        print("{} Miss necessary parameters, please use \'-h\' to check usage".format(INVALID_PARAM_ERROR))
         return
+
     # load model
-    ok, model, model_type = load_model(path=args.src_model_path, cls=cls, func=func)
+    ok, model, model_type = load_model(model_path=args.src_model_path, python_path=args.net_file,
+                                       class_name=args.cls_name, func_name=args.func_name)
     if not ok:
         return
+    # prepare to save model
     if not os.path.exists(args.dst_model_dir) or not os.path.isdir(args.dst_model_dir):
         os.makedirs(args.dst_model_dir)
     # convert to onnx
@@ -284,11 +312,4 @@ def main(module):
 
 
 if __name__ == '__main__':
-    args = get_args()
-    ok, import_module_dir, import_module_name = parse_net_cls_path(net_file_path=args.net_file)
-    if ok:
-        module = import_module(module_path=import_module_dir,
-                               module_name=import_module_name,
-                               module_elm=[args.cls_name])
-        if module is not None:
-            main(module=module)
+    main()
